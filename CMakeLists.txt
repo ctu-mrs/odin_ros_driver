@@ -36,7 +36,7 @@ endif()
 
 # Find precompiled lydHostApi library
 find_library(LYD_HOST_API_LIB
-    NAMES 
+    NAMES
         ${LYD_HOST_API_LIB_NAME}
         lib${LYD_HOST_API_LIB_NAME}.a
         lib${LYD_HOST_API_LIB_NAME}.so
@@ -123,9 +123,9 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 # ===== Targets Configuration =====
 
 # host_sdk_sample
-add_executable(host_sdk_sample 
+add_executable(host_sdk_sample
     src/host_sdk_sample.cpp
-    src/yaml_parser.cpp  
+    src/yaml_parser.cpp
     src/rawCloudRender.cpp
     src/camera_pose_visualization.cpp
 )
@@ -216,8 +216,8 @@ endif()
 
 # ===== Installation Rules =====
 
-install(TARGETS 
-    host_sdk_sample 
+install(TARGETS
+    host_sdk_sample
     pcd2depth_ros2_node
     cloud_reprojection_ros2_node
     image_overlay_node
@@ -255,11 +255,3 @@ ament_export_dependencies(
 )
 
 ament_package()
-
-# Add debug information
-message(STATUS "=======================================")
-message(STATUS "Project: ${PROJECT_NAME} (ROS 2 Jazzy Build)")
-message(STATUS "Target platform: ${TARGET_PLATFORM}")
-message(STATUS "lydHostApi library: ${LYD_HOST_API_LIB}")
-message(STATUS "libusb library: ${LIBUSB_LIBRARIES}")
-message(STATUS "=======================================")
