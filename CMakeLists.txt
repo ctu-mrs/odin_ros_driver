@@ -254,4 +254,10 @@ ament_export_dependencies(
     geometry_msgs tf2_geometry_msgs ament_index_cpp
 )
 
+install(
+  DIRECTORY tmux
+  USE_SOURCE_PERMISSIONS
+  DESTINATION share/${PROJECT_NAME}
+)
+
 ament_package()
