@@ -20,11 +20,13 @@ def generate_launch_description():
     
     # #{ config
 
-    config_file_arg = DeclareLaunchArgument(
-        'config_file',
+    config = LaunchConfiguration('config')
+
+    ld.add_action(DeclareLaunchArgument(
+        'config',
         default_value=os.path.join(this_pkg_path, 'config', 'control_command.yaml'),
-        description='Path to the control config YAML file'
-    )
+        description='Path to the default config YAML file'
+    ))
 
     # #} end of config
 
@@ -40,49 +42,46 @@ def generate_launch_description():
 
     # #} end of custom_config
     
-    # Create main node
-    host_sdk_node = Node(
+    ld.add_action(Node(
         package='odin_ros_driver',
         executable='host_sdk_sample',
         name='host_sdk_sample',
         output='screen',
         namespace=namespace,
-        parameters=[{
-            'config_file': LaunchConfiguration('config_file')
-        }]
-    )
+        parameters=[
+            {'log_dir': "/tmp/odin/log"},
+            {'map_dir': "/tmp/odin/map"},
+            {'data_dir': "/tmp/odin/data"},
+            {'config': config}
+        ]
+    ))
 
-    pcd2depth_config_path = os.path.join(this_pkg_path, 'config', 'control_command.yaml')
-    with open(pcd2depth_config_path, 'r') as f:
-        pcd2depth_params = yaml.safe_load(f) 
-    pcd2depth_calib_path = os.path.join(this_pkg_path, 'config', 'calib.yaml')
-    pcd2depth_params['calib_file_path'] = pcd2depth_calib_path 
-    pcd2depth_node = Node(
-        package='odin_ros_driver',
-        executable='pcd2depth_ros2_node',  
-        name='pcd2depth_ros2_node',
-        output='screen',
-        namespace=namespace,
-        parameters=[pcd2depth_params]
-    )
+    # pcd2depth_config_path = os.path.join(this_pkg_path, 'config', 'control_command.yaml')
+    # with open(pcd2depth_config_path, 'r') as f:
+    #     pcd2depth_params = yaml.safe_load(f) 
+    # pcd2depth_calib_path = os.path.join(this_pkg_path, 'config', 'calib.yaml')
+    # pcd2depth_params['calib_file_path'] = pcd2depth_calib_path 
+    # ld.add_action(Node(
+    #     package='odin_ros_driver',
+    #     executable='pcd2depth_ros2_node',  
+    #     name='pcd2depth_ros2_node',
+    #     output='screen',
+    #     namespace=namespace,
+    #     parameters=[pcd2depth_params]
+    # ))
 
-    # Image overlay node - overlays reprojected points on camera image
-    overlay_config_path = os.path.join(this_pkg_path, 'config', 'control_command.yaml')
-    with open(overlay_config_path, 'r') as f:
-        overlay_params = yaml.safe_load(f)
+    # # Image overlay node - overlays reprojected points on camera image
+    # overlay_config_path = os.path.join(this_pkg_path, 'config', 'control_command.yaml')
+    # with open(overlay_config_path, 'r') as f:
+    #     overlay_params = yaml.safe_load(f)
 
-    image_overlay_node = Node(
-        package='odin_ros_driver',
-        executable='image_overlay_node',  
-        name='image_overlay_node',
-        output='screen',
-        namespace=namespace,
-        parameters=[overlay_params]
-    )
-
-    ld.add_action(config_file_arg)
-    ld.add_action(host_sdk_node)
-    ld.add_action(pcd2depth_node)
-    ld.add_action(image_overlay_node)
+    # ld.add_action(Node(
+    #     package='odin_ros_driver',
+    #     executable='image_overlay_node',  
+    #     name='image_overlay_node',
+    #     output='screen',
+    #     namespace=namespace,
+    #     parameters=[overlay_params]
+    # ))
     
     return ld

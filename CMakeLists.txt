@@ -56,10 +56,11 @@ else()
     endif()
 endif()
 
-# Set common compile options
-set(CMAKE_CXX_STANDARD 17)
+# set the correct standards
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Find common non-ROS dependencies
 find_package(PkgConfig REQUIRED)
@@ -68,6 +69,7 @@ find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(OpenSSL REQUIRED)
+find_package(mrs_lib REQUIRED)
 pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
 
 # Find ROS2 specific packages
@@ -134,6 +136,7 @@ target_link_libraries(host_sdk_sample
     ${COMMON_LIBS}
     yaml-cpp
     usb-1.0
+    mrs_lib::mrs_lib
 )
 
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
@@ -150,6 +153,7 @@ add_library(pointcloud_depth_converter_ros2 src/pointcloud_depth_converter.cpp)
 target_link_libraries(pointcloud_depth_converter_ros2
     ${OpenCV_LIBS}
     ${PCL_LIBRARIES}
+    mrs_lib::mrs_lib
 )
 
 # depth_image_ros2_node_lib
@@ -158,6 +162,7 @@ target_link_libraries(depth_image_ros2_node_lib
     pointcloud_depth_converter_ros2
     ${OpenCV_LIBS}
     ${PCL_LIBRARIES}
+    mrs_lib::mrs_lib
 )
 ament_target_dependencies(depth_image_ros2_node_lib
     rclcpp sensor_msgs std_msgs cv_bridge image_transport pcl_conversions message_filters
@@ -170,6 +175,7 @@ target_link_libraries(pcd2depth_ros2_node
     ${OpenCV_LIBS}
     ${PCL_LIBRARIES}
     yaml-cpp
+    mrs_lib::mrs_lib
 )
 ament_target_dependencies(pcd2depth_ros2_node
     rclcpp sensor_msgs std_msgs cv_bridge image_transport pcl_conversions message_filters
@@ -181,6 +187,7 @@ target_compile_definitions(cloud_reprojector_ros2 PRIVATE ROS2)
 target_link_libraries(cloud_reprojector_ros2
     ${OpenCV_LIBS}
     ${PCL_LIBRARIES}
+    mrs_lib::mrs_lib
 )
 
 # cloud_reprojection_ros2_node
@@ -191,6 +198,7 @@ target_link_libraries(cloud_reprojection_ros2_node
     ${OpenCV_LIBS}
     ${PCL_LIBRARIES}
     yaml-cpp
+    mrs_lib::mrs_lib
 )
 ament_target_dependencies(cloud_reprojection_ros2_node
     rclcpp sensor_msgs nav_msgs cv_bridge image_transport pcl_conversions message_filters
@@ -201,7 +209,9 @@ add_executable(image_overlay_node src/image_overlay_node.cpp)
 target_compile_definitions(image_overlay_node PRIVATE ROS2)
 target_link_libraries(image_overlay_node
     ${OpenCV_LIBS}
+    mrs_lib::mrs_lib
 )
+
 ament_target_dependencies(image_overlay_node
     rclcpp sensor_msgs cv_bridge image_transport message_filters
 )
