@@ -1239,13 +1239,56 @@ public:
       msg.twist.twist.angular.y = static_cast<double>(odom_data->angular_velocity[1]) / 1e6;
       msg.twist.twist.angular.z = static_cast<double>(odom_data->angular_velocity[2]) / 1e6;
 
+      for (int i = 0; i < 36; ++i) {
+        msg.twist.covariance[i] = odom_data->twist_cov[i];
+      }
+
       // Copy original covariance data
       for (int i = 0; i < 36; ++i) {
         msg.pose.covariance[i] = odom_data->pose_cov[i];
       }
 
-      for (int i = 0; i < 36; ++i) {
-        msg.twist.covariance[i] = odom_data->twist_cov[i];
+      {
+        // fix: transforming these into the body frame
+        // Extract the orientation of the Body in the World
+        Eigen::Quaterniond q_body_in_world(msg.pose.pose.orientation.w, msg.pose.pose.orientation.x, msg.pose.pose.orientation.y, msg.pose.pose.orientation.z);
+
+        // Get the inverse rotation matrix (World -> Body)
+        Eigen::Matrix3d R_world_to_body = q_body_in_world.inverse().toRotationMatrix();
+
+        // Load the current world-frame velocities
+        Eigen::Vector3d v_world(msg.twist.twist.linear.x, msg.twist.twist.linear.y, msg.twist.twist.linear.z);
+        Eigen::Vector3d w_world(msg.twist.twist.angular.x, msg.twist.twist.angular.y, msg.twist.twist.angular.z);
+
+        // Rotate to body frame
+        Eigen::Vector3d v_body = R_world_to_body * v_world;
+        Eigen::Vector3d w_body = R_world_to_body * w_world;
+
+        // Overwrite the message with the correct body-frame velocities
+        msg.twist.twist.linear.x  = v_body.x();
+        msg.twist.twist.linear.y  = v_body.y();
+        msg.twist.twist.linear.z  = v_body.z();
+        msg.twist.twist.angular.x = w_body.x();
+        msg.twist.twist.angular.y = w_body.y();
+        msg.twist.twist.angular.z = w_body.z();
+
+        // ==========================================
+        // 3. TRANSFORM COVARIANCE TO BODY FRAME
+        // ==========================================
+
+        // Map the ROS std::array to an Eigen Matrix for in-place math
+        Eigen::Map<Eigen::Matrix<double, 6, 6, Eigen::RowMajor>> cov_world(msg.twist.covariance.data());
+
+        // Construct the 6x6 block-diagonal rotation matrix
+        Eigen::Matrix<double, 6, 6> R_twist = Eigen::Matrix<double, 6, 6>::Zero();
+        R_twist.block<3, 3>(0, 0)           = R_world_to_body;
+        R_twist.block<3, 3>(3, 3)           = R_world_to_body;
+
+        // Rotate the covariance matrix: Cov_body = R * Cov_world * R^T
+        Eigen::Matrix<double, 6, 6> cov_body = R_twist * cov_world * R_twist.transpose();
+
+        // Overwrite the original covariance array with the rotated data
+        cov_world = cov_body;
       }
 
     } else if (data_len == sizeof(ros2_odom_convert_t)) {
@@ -1264,7 +1307,9 @@ public:
     }
 
     switch (odom_type) {
+
       case OdometryType::STANDARD: {
+
         if (getRosNodeControl()->sendOdomBaseLinkTF()) {
           geometry_msgs::msg::TransformStamped transformStamped;
           transformStamped.header.stamp            = msg.header.stamp;
@@ -1331,9 +1376,13 @@ public:
           cameraposevisual_.publish_by(*pub_camera_pose_visual_, msg.header);
         }
       } break;
-      case OdometryType::HIGHFREQ:
+
+      case OdometryType::HIGHFREQ: {
+
         odom_highfreq_publisher_->publish(std::move(msg));
         break;
+      }
+
       case OdometryType::TRANSFORM: {
         geometry_msgs::msg::TransformStamped transformStamped;
         transformStamped.header.stamp            = msg.header.stamp;
