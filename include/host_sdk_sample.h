@@ -108,6 +108,7 @@ double     get_ptp_smoothed_offset();
 #include <sensor_msgs/msg/point_field.hpp>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_ros/transform_broadcaster.h>
+#include <tf2_ros/static_transform_broadcaster.h>
 
 namespace ros
 {
@@ -1432,6 +1433,36 @@ public:
         R_ic_               = Eigen::Quaterniond(Ric);
         t_ic_               = tic;
         extrinsic_ok_       = true;
+
+        // Construct the TF message
+        geometry_msgs::msg::TransformStamped t;
+
+        // Use the current time (static transforms are typically latched, but need a valid stamp)
+        t.header.stamp = node_->get_clock()->now();
+
+        // The parent frame (usually the IMU or Lidar/Body frame in this context)
+        t.header.frame_id = body_frame;
+
+        // The child frame (the standard optical frame with Z pointing forward)
+        t.child_frame_id = camera_frame;
+
+        // Set the translation from your Eigen vector
+        t.transform.translation.x = t_ic_.x();
+        t.transform.translation.y = t_ic_.y();
+        t.transform.translation.z = t_ic_.z();
+
+        // Set the rotation from your Eigen quaternion
+        // Note: Eigen::Quaterniond stores (w, x, y, z) internally, but the accessor
+        // methods x(), y(), z(), w() safely map to the correct ROS fields.
+        t.transform.rotation.x = R_ic_.x();
+        t.transform.rotation.y = R_ic_.y();
+        t.transform.rotation.z = R_ic_.z();
+        t.transform.rotation.w = R_ic_.w();
+
+        // Publish the static transform
+        static_tf_broadcaster_->sendTransform(t);
+
+        RCLCPP_INFO(node_->get_logger(), "Published static TF from %s to %s", t.header.frame_id.c_str(), t.child_frame_id.c_str());
       }
 
       m_cam_init_success = true;
@@ -1560,10 +1591,11 @@ private:
     intensity_gray_pub_      = node_->create_publisher<sensor_msgs::msg::Image>("odin1/image/intensity_gray", qos_sensor);
     wiwc_publisher_          = node_->create_publisher<ros::Odometry>("odin1/wiwc", qos_sensor);
     tf_broadcaster           = std::make_unique<tf2_ros::TransformBroadcaster>(node_);
+    static_tf_broadcaster_   = std::make_shared<tf2_ros::StaticTransformBroadcaster>(node_);
 
     /* undistort_rgb_pub_ = node_->create_publisher<sensor_msgs::msg::Image>("odin1/image/undistorted", qos_sensor); */
 
-    undistort_rgb_pub_ = it_->advertiseCamera("odin1/image/undistorted", 1);
+    undistort_rgb_pub_ = it_->advertiseCamera("odin1/rectified/image_raw", 1);
   }
 
   rclcpp::Node::SharedPtr node_;
@@ -1589,6 +1621,7 @@ private:
   rclcpp::Publisher<ros::Odometry>::SharedPtr                        wiwc_publisher_;
   camera_pose_visualization                                          cameraposevisual_;
   std::unique_ptr<tf2_ros::TransformBroadcaster>                     tf_broadcaster;
+  std::shared_ptr<tf2_ros::StaticTransformBroadcaster>               static_tf_broadcaster_;
 };
 
 class CommandLineControl {

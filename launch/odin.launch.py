@@ -61,16 +61,16 @@ def generate_launch_description():
         ]
     ))
 
-    ld.add_action(
-        # Nodes under test
-        Node(
-            package='tf2_ros',
-            namespace='',
-            executable='static_transform_publisher',
-            name='odin_camera_tf',
-            arguments=["0.0", "0.0", "0.0", "-1.57", "0", "-1.57", "odin_body", "odin_camera"],
-        )
-    )
+    # ld.add_action(
+    #     # Nodes under test
+    #     Node(
+    #         package='tf2_ros',
+    #         namespace='',
+    #         executable='static_transform_publisher',
+    #         name='odin_camera_tf',
+    #         arguments=["0.0", "0.0", "0.0", "-1.57", "0", "-1.57", "odin_body", "odin_camera"],
+    #     )
+    # )
 
     # pcd2depth_config_path = os.path.join(this_pkg_path, 'config', 'control_command.yaml')
     # with open(pcd2depth_config_path, 'r') as f:
