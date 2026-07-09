@@ -303,6 +303,10 @@ static void stop_imu_thread();
 static bool convert_calib_to_cam_in_ex(const std::string& calib_path, const std::filesystem::path& out_path);
 
 std::string config_dir;
+std::string map_frame;
+std::string odom_frame;
+std::string body_frame;
+std::string camera_frame;
 
 /* signal_handler() //{ */
 
@@ -324,15 +328,16 @@ static void signal_handler(int signum) {
 
     // Close device
     if (odinDevice) {
-      // Convert calib.yaml to cam_in_ex.txt at program end
-      if (g_ros_object) {
-        const std::filesystem::path out_path = g_ros_object->get_root_dir() / "image" / "cam_in_ex.txt";
-        (void)convert_calib_to_cam_in_ex(calib_file_, out_path);
 
-        RCLCPP_INFO(rclcpp::get_logger("device_cb"), "pose_index: %d", g_ros_object->get_pose_index());
-        RCLCPP_INFO(rclcpp::get_logger("device_cb"), "cloud_index: %d", g_ros_object->get_cloud_index());
-        RCLCPP_INFO(rclcpp::get_logger("device_cb"), "image_index: %d", g_ros_object->get_image_index());
-      }
+      // Convert calib.yaml to cam_in_ex.txt at program end
+      /* if (g_ros_object) { */
+      /*   const std::filesystem::path out_path = g_ros_object->get_root_dir() / "image" / "cam_in_ex.txt"; */
+      /*   (void)convert_calib_to_cam_in_ex(calib_file_, out_path); */
+
+      /*   RCLCPP_INFO(rclcpp::get_logger("device_cb"), "pose_index: %d", g_ros_object->get_pose_index()); */
+      /*   RCLCPP_INFO(rclcpp::get_logger("device_cb"), "cloud_index: %d", g_ros_object->get_cloud_index()); */
+      /*   RCLCPP_INFO(rclcpp::get_logger("device_cb"), "image_index: %d", g_ros_object->get_image_index()); */
+      /* } */
 
       RCLCPP_INFO(rclcpp::get_logger("signal_handler"), "Closing device...");
 
@@ -1472,11 +1477,17 @@ int main(int argc, char* argv[]) {
   param_loader.loadParam("data_dir", data_dir);
   param_loader.loadParam("log_dir", log_dir);
   param_loader.loadParam("config_dir", config_dir);
+  param_loader.loadParam("map_frame", map_frame);
+  param_loader.loadParam("camera_frame", camera_frame);
+  param_loader.loadParam("body_frame", body_frame);
+  param_loader.loadParam("odom_frame", odom_frame);
 
   if (!param_loader.loadedSuccessfully()) {
     RCLCPP_ERROR(node->get_logger(), "Could not load all parameters!");
     rclcpp::shutdown();
   }
+
+  g_ros_object->setFrames(map_frame, odom_frame, body_frame, camera_frame);
 
   // -----------------------------------------------------------------
   // AE/AWB debug services (ROS2). Allow a side terminal to tune the
@@ -1774,10 +1785,10 @@ int main(int argc, char* argv[]) {
   if (odinDevice) {
 
     // Convert calib.yaml to cam_in_ex.txt at program end
-    if (g_ros_object) {
-      const std::filesystem::path out_path = g_ros_object->get_root_dir() / "image" / "cam_in_ex.txt";
-      (void)convert_calib_to_cam_in_ex(calib_file_, out_path);
-    }
+    // if (g_ros_object) {
+    //   const std::filesystem::path out_path = g_ros_object->get_root_dir() / "image" / "cam_in_ex.txt";
+    //   (void)convert_calib_to_cam_in_ex(calib_file_, out_path);
+    // }
 
     RCLCPP_INFO(rclcpp::get_logger("device_cb"), "pose_index: %d", g_ros_object->get_pose_index());
     RCLCPP_INFO(rclcpp::get_logger("device_cb"), "cloud_index: %d", g_ros_object->get_cloud_index());

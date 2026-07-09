@@ -49,6 +49,10 @@ def generate_launch_description():
         output='screen',
         namespace=namespace,
         parameters=[
+            {'odom_frame': "odin_odom"},
+            {'map_frame': "odin_map"},
+            {'body_frame': "odin_body"},
+            {'camera_frame': "odin_camera"},
             {'log_dir': "/tmp/odin/log"},
             {'map_dir': "/tmp/odin/map"},
             {'data_dir': "/tmp/odin/data"},
@@ -64,7 +68,7 @@ def generate_launch_description():
             namespace='',
             executable='static_transform_publisher',
             name='odin_camera_tf',
-            arguments=["0.0", "0.0", "0.0", "-1.57", "0", "-1.57", "odin1_base_link", "odin1_camera"],
+            arguments=["0.0", "0.0", "0.0", "-1.57", "0", "-1.57", "odin_body", "odin_camera"],
         )
     )
 
