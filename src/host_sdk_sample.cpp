@@ -302,6 +302,8 @@ static void stop_imu_thread();
 
 static bool convert_calib_to_cam_in_ex(const std::string& calib_path, const std::filesystem::path& out_path);
 
+std::string config_dir;
+
 /* signal_handler() //{ */
 
 // Signal handler for Ctrl+C
@@ -1067,22 +1069,7 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
       RCLCPP_ERROR(rclcpp::get_logger("device_cb"), "Create device failed");
       return;
     }
-    const std::string package_name = "odin_ros_driver";
-    std::string       config_dir   = "";
 
-    char* ros_workspace = std::getenv("COLCON_PREFIX_PATH");
-    if (ros_workspace) {
-      std::string workspace_path(ros_workspace);
-      size_t      pos = workspace_path.find("/install");
-      if (pos != std::string::npos) {
-        config_dir = workspace_path.substr(0, pos) + "/src/odin_ros_driver/config";
-      } else {
-        config_dir = ament_index_cpp::get_package_share_directory(package_name) + "/config";
-      }
-    } else {
-      config_dir = ament_index_cpp::get_package_share_directory(package_name) + "/config";
-    }
-    std::cout << "config_dir" << config_dir << std::endl;
     RCLCPP_INFO(rclcpp::get_logger("device_cb"), "Calibration files will be saved to: %s", config_dir.c_str());
 
     std::filesystem::path per_con_log_root_dir;
@@ -1191,7 +1178,6 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
         break;
       case LIDAR_DEVICE_STREAM_STOPPED:
         need_open_device = false;
-        get_calib_file   = false;
         RCLCPP_INFO(rclcpp::get_logger("device_cb"), "Device state: stream stopped, resume streaming");
         break;
       default:
@@ -1485,6 +1471,7 @@ int main(int argc, char* argv[]) {
   param_loader.loadParam("map_dir", map_dir);
   param_loader.loadParam("data_dir", data_dir);
   param_loader.loadParam("log_dir", log_dir);
+  param_loader.loadParam("config_dir", config_dir);
 
   if (!param_loader.loadedSuccessfully()) {
     RCLCPP_ERROR(node->get_logger(), "Could not load all parameters!");
@@ -1785,11 +1772,13 @@ int main(int argc, char* argv[]) {
 
   // Cleanup on normal program exit
   if (odinDevice) {
+
     // Convert calib.yaml to cam_in_ex.txt at program end
     if (g_ros_object) {
       const std::filesystem::path out_path = g_ros_object->get_root_dir() / "image" / "cam_in_ex.txt";
       (void)convert_calib_to_cam_in_ex(calib_file_, out_path);
     }
+
     RCLCPP_INFO(rclcpp::get_logger("device_cb"), "pose_index: %d", g_ros_object->get_pose_index());
     RCLCPP_INFO(rclcpp::get_logger("device_cb"), "cloud_index: %d", g_ros_object->get_cloud_index());
     RCLCPP_INFO(rclcpp::get_logger("device_cb"), "image_index: %d", g_ros_object->get_image_index());

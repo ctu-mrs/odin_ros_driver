@@ -52,9 +52,21 @@ def generate_launch_description():
             {'log_dir': "/tmp/odin/log"},
             {'map_dir': "/tmp/odin/map"},
             {'data_dir': "/tmp/odin/data"},
+            {'config_dir': "/tmp/odin/config"},
             {'config': config}
         ]
     ))
+
+    ld.add_action(
+        # Nodes under test
+        Node(
+            package='tf2_ros',
+            namespace='',
+            executable='static_transform_publisher',
+            name='odin_camera_tf',
+            arguments=["0.0", "0.0", "0.0", "-1.57", "0", "-1.57", "odin1_base_link", "odin1_camera"],
+        )
+    )
 
     # pcd2depth_config_path = os.path.join(this_pkg_path, 'config', 'control_command.yaml')
     # with open(pcd2depth_config_path, 'r') as f:
