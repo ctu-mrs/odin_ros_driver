@@ -16,7 +16,6 @@ def generate_launch_description():
     pkg_name = "odin_ros_driver"
 
     this_pkg_path = get_package_share_directory(pkg_name)
-    namespace="odin"
     
     # #{ config
 
@@ -36,7 +35,7 @@ def generate_launch_description():
 
     ld.add_action(DeclareLaunchArgument(
         'uav_name',
-        default_value=os.getenv('UAV_NAME', "uav1"),
+        default_value=os.getenv('UAV_NAME', ""),
         description="The uav name used for namespacing.",
     ))
 
@@ -45,9 +44,9 @@ def generate_launch_description():
     ld.add_action(Node(
         package='odin_ros_driver',
         executable='host_sdk_sample',
-        name='host_sdk_sample',
+        name='odin1',
         output='screen',
-        namespace=namespace,
+        namespace=uav_name,
         parameters=[
             {'odom_frame': "odin_odom"},
             {'map_frame': "odin_map"},

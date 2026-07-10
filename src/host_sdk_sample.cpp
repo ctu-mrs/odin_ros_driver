@@ -1494,10 +1494,10 @@ int main(int argc, char* argv[]) {
   // camera AE/AWB at runtime via `ros2 service call`, while the
   // driver keeps streaming.
   //
-  //   /odin1/get_ae   odin_ros_driver/srv/GetAe   - query AE state
-  //   /odin1/get_awb  odin_ros_driver/srv/GetAwb  - query AWB state
-  //   /odin1/set_ae   odin_ros_driver/srv/SetAe   - set AE mode/params
-  //   /odin1/set_awb  odin_ros_driver/srv/SetAwb  - set AWB mode/params
+  //   ~/get_ae   odin_ros_driver/srv/GetAe   - query AE state
+  //   ~/get_awb  odin_ros_driver/srv/GetAwb  - query AWB state
+  //   ~/set_ae   odin_ros_driver/srv/SetAe   - set AE mode/params
+  //   ~/set_awb  odin_ros_driver/srv/SetAwb  - set AWB mode/params
   //
   // Request semantics (set_ae / set_awb):
   //   mode == 0 (AUTO)   : device runs its own AE/AWB loop; the
@@ -1523,7 +1523,7 @@ int main(int argc, char* argv[]) {
   // locking is required here.
   // -----------------------------------------------------------------
   auto srv_get_ae = node->create_service<odin_ros_driver::srv::GetAe>(
-      "/odin1/get_ae", [](const std::shared_ptr<odin_ros_driver::srv::GetAe::Request> /*req*/, std::shared_ptr<odin_ros_driver::srv::GetAe::Response> res) {
+      "~/get_ae", [](const std::shared_ptr<odin_ros_driver::srv::GetAe::Request> /*req*/, std::shared_ptr<odin_ros_driver::srv::GetAe::Response> res) {
         if (odinDevice == nullptr) {
           res->success = false;
           res->rc      = -100;
@@ -1543,7 +1543,7 @@ int main(int argc, char* argv[]) {
       });
 
   auto srv_get_awb = node->create_service<odin_ros_driver::srv::GetAwb>(
-      "/odin1/get_awb", [](const std::shared_ptr<odin_ros_driver::srv::GetAwb::Request> /*req*/, std::shared_ptr<odin_ros_driver::srv::GetAwb::Response> res) {
+      "~/get_awb", [](const std::shared_ptr<odin_ros_driver::srv::GetAwb::Request> /*req*/, std::shared_ptr<odin_ros_driver::srv::GetAwb::Response> res) {
         if (odinDevice == nullptr) {
           res->success = false;
           res->rc      = -100;
@@ -1563,7 +1563,7 @@ int main(int argc, char* argv[]) {
       });
 
   auto srv_set_ae = node->create_service<odin_ros_driver::srv::SetAe>(
-      "/odin1/set_ae", [](const std::shared_ptr<odin_ros_driver::srv::SetAe::Request> req, std::shared_ptr<odin_ros_driver::srv::SetAe::Response> res) {
+      "~/set_ae", [](const std::shared_ptr<odin_ros_driver::srv::SetAe::Request> req, std::shared_ptr<odin_ros_driver::srv::SetAe::Response> res) {
         if (odinDevice == nullptr) {
           res->success = false;
           res->rc      = -100;
@@ -1576,7 +1576,7 @@ int main(int argc, char* argv[]) {
       });
 
   auto srv_set_awb = node->create_service<odin_ros_driver::srv::SetAwb>(
-      "/odin1/set_awb", [](const std::shared_ptr<odin_ros_driver::srv::SetAwb::Request> req, std::shared_ptr<odin_ros_driver::srv::SetAwb::Response> res) {
+      "~/set_awb", [](const std::shared_ptr<odin_ros_driver::srv::SetAwb::Request> req, std::shared_ptr<odin_ros_driver::srv::SetAwb::Response> res) {
         if (odinDevice == nullptr) {
           res->success = false;
           res->rc      = -100;
@@ -1590,7 +1590,7 @@ int main(int argc, char* argv[]) {
 
   RCLCPP_INFO(node->get_logger(),
               "AE/AWB debug services ready: "
-              "/odin1/get_ae /odin1/get_awb /odin1/set_ae /odin1/set_awb");
+              "~/get_ae ~/get_awb ~/set_ae ~/set_awb");
 
   // Register signal handlers for Ctrl+C
   signal(SIGINT, signal_handler);
