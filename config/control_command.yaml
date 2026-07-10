@@ -51,7 +51,7 @@ register_keys:
   dtof_fps: 100           # 100: 10fps; 145: 14.5fps 290: dtof 10hz + camera 29hz
 
   # slam cloud data
-  sendcloudslam: 1        # 0: off; 1: on
+  sendcloudslam: 0        # 0: off; 1: on
 
   # processed with raw point cloud, rgb image, and calib.yaml from device
   # Processed on host device
@@ -85,7 +85,7 @@ register_keys:
   save_log: 0 # 0: off; 1: on; 
 
   # raw dtof sensor intensity data in gray format, mostly for debug purpose.
-  pubintensitygray: 1     # 0: off; 1: on
+  pubintensitygray: 0     # 0: off; 1: on
 
   showpath: 0             # 0: off; 1: on
   showcamerapose: 0       # 0: off; 1: on

@@ -62,6 +62,7 @@ limitations under the License.
 
 #include <image_transport/image_transport.hpp>
 #include <image_transport/camera_publisher.hpp>
+#include <image_transport/publisher.hpp>
 
 //}
 
@@ -214,18 +215,9 @@ inline uint64_t aligned_stamp_ns(uint64_t sensor_timestamp_ns) {
   return sensor_timestamp_ns;
 }
 
-inline ros::Time make_aligned_stamp(uint64_t sensor_timestamp_ns
-#ifdef ROS2
-                                    ,
-                                    const rclcpp::Node::SharedPtr& node
-#endif
-) {
+inline ros::Time make_aligned_stamp(uint64_t sensor_timestamp_ns, const rclcpp::Node::SharedPtr& node) {
   if (g_use_host_ros_time == 1) {
-#ifdef ROS2
     return node->now();
-#else
-    return ros::Time::now();
-#endif
   }
 
   uint64_t ts_ns = sensor_timestamp_ns;
@@ -364,7 +356,10 @@ public:
   using ImageConstPtr       = ImageMsg::ConstSharedPtr;
   using PointCloud2ConstPtr = PointCloud2Msg::ConstSharedPtr;
 
+  /* try_process_pair() //{ */
+
   void try_process_pair() {
+
     // Record queue status
     size_t rgb_size, pcd_size;
     {
@@ -434,12 +429,15 @@ public:
       process_pair(rgb_msg, pcd_msg);
     }
   }
+
+  //}
+
+  /* validate_render_parameters() //{ */
+
   bool validate_render_parameters(std::vector<std::vector<float>>& rgb_image, capture_Image_List_t* cloud_stream, int pcd_idx) {
+
     // 1. Check RGB image validity
     if (rgb_image.empty()) {
-#ifndef ROS2
-      ROS_ERROR("Invalid RGB image: empty vector");
-#endif
       return false;
     }
 
@@ -448,48 +446,38 @@ public:
     const size_t width  = (height > 0) ? rgb_image[0].size() : 0;
 
     if (height == 0 || width == 0) {
-#ifndef ROS2
-      ROS_ERROR("Invalid RGB image dimensions: %zux%zu", height, width);
-#endif
       return false;
     }
 
     // 2. Check point cloud stream pointer validity
     if (!cloud_stream) {
-#ifndef ROS2
-      ROS_ERROR("Invalid cloud stream: null pointer");
-#endif
       return false;
     }
 
     // 3. Check point cloud index validity
     if (pcd_idx < 0 || pcd_idx >= 10) {
-#ifndef ROS2
-      ROS_ERROR("Invalid pcd index: %d (must be 0-9)", pcd_idx);
-#endif
       return false;
     }
 
     // 4. Check point cloud data validity
     buffer_List_t& cloud = cloud_stream->imageList[pcd_idx];
     if (!cloud.pAddr) {
-#ifndef ROS2
-      ROS_ERROR("Invalid cloud data: null pointer");
-#endif
       return false;
     }
 
     if (cloud.width <= 0 || cloud.height <= 0) {
-#ifndef ROS2
-      ROS_ERROR("Invalid cloud dimensions: %dx%d", cloud.width, cloud.height);
-#endif
       return false;
     }
 
     return true;
   }
 
+  //}
+
+  /* process_pair() //{ */
+
   void process_pair(const ImageConstPtr& rgb_msg, const PointCloud2ConstPtr& pcd_msg) {
+
     auto start_time = std::chrono::steady_clock::now();
 
     const int input_image_width  = rgb_msg->width;
@@ -497,9 +485,6 @@ public:
 
     // Verify input image format
     if (rgb_msg->encoding != "bgr8") {
-#ifndef ROS2
-      ROS_ERROR("Unsupported image format: %s. Only bgr8 is supported.", rgb_msg->encoding.c_str());
-#endif
       return;
     }
 
@@ -585,7 +570,12 @@ public:
     }
   }
 
+  //}
+
+  /* publishIntensityCloud() //{ */
+
   void publishIntensityCloud(capture_Image_List_t* stream, int idx) {
+
     // Check index validity
     if (idx < 0 || idx >= 10) {
       return;
@@ -704,6 +694,7 @@ public:
 
     // Only cache point cloud if cloud_render is enabled
     if (g_sendcloudrender) {
+
       std::lock_guard<std::mutex> lock(pcd_queue_mutex_);
 
       // Create deep copy of point cloud
@@ -722,7 +713,12 @@ public:
     cloud_pub_->publish(*msg);
   }
 
+  //}
+
+  /* publishGrayUInt8() //{ */
+
   void publishGrayUInt8(capture_Image_List_t* stream, int idx) {
+
     ImageMsg msg;
     msg.header.stamp    = make_aligned_stamp(stream->imageList[idx].timestamp, node_);
     msg.header.frame_id = map_frame;
@@ -742,23 +738,20 @@ public:
 
     memcpy(msg.data.data(), stream->imageList[idx].pAddr, image_size);
 
-#ifdef ROS2
     intensity_gray_pub_->publish(msg);
-#else
-    intensity_gray_pub_.publish(msg);
-#endif
   }
 
+  //}
+
+  /* publishRgb() //{ */
+
   void publishRgb(capture_Image_List_t* stream) {
+
     buffer_List_t& image = stream->imageList[0];
 
     // old version yuv data
     if (image.length == image.width * image.height * 3 / 2) {
-#ifdef ROS2
       RCLCPP_INFO(rclcpp::get_logger("publishRgb"), "old format rgb data, please upgrade device firmware");
-#else
-      ROS_INFO("old format rgb data, please upgrade device firmware");
-#endif
     } else {  // new version jpeg data
 
       std::vector<uint8_t> jpeg_data(static_cast<uint8_t*>(image.pAddr), static_cast<uint8_t*>(image.pAddr) + image.length);
@@ -767,13 +760,10 @@ public:
       cv::Mat decoded_image = cv::imdecode(jpeg_data, cv::IMREAD_COLOR);
 
       cv_bridge::CvImage cv_image;
-#ifdef ROS2
+
       cv_image.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp, node_);
-#else
-      cv_image.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp);
-#endif
-      cv_image.encoding = "bgr8";
-      cv_image.image    = decoded_image;
+      cv_image.encoding     = "bgr8";
+      cv_image.image        = decoded_image;
 
       if (g_sendcloudrender) {
         std::lock_guard<std::mutex> lock(rgb_queue_mutex_);
@@ -815,7 +805,7 @@ public:
       }
 
       {
-        rgb_pub_->publish(*cv_image.toImageMsg());
+        rgb_pub_.publish(*cv_image.toImageMsg());
 
         if (m_undistort_map_init_success) {
 
@@ -872,18 +862,13 @@ public:
 
           undistort_rgb_pub_.publish(*cv_undistorted_image.toImageMsg(), cam_info);
         }
-
-        // original jpeg - always publish as it's small
-        sensor_msgs::msg::CompressedImage jpeg_msg;
-        jpeg_msg.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp, node_);
-        jpeg_msg.format       = "jpeg";
-        jpeg_msg.data         = jpeg_data;
-
-        compressed_rgb_pub_->publish(jpeg_msg);
       }
     }
   }
 
+  //}
+
+  /* publishPC2XYZRGBA() //{ */
 
   void publishPC2XYZRGBA(capture_Image_List_t* stream, int idx) {
 
@@ -914,23 +899,15 @@ public:
     int32_t* xyz_data = static_cast<int32_t*>(stream->imageList[idx].pAddr);
 
     for (uint32_t i = 0; i < points; i++) {
+
       int32_t* ptr = xyz_data + 7 * i;
 
-#ifdef ROS2
       *iter_x = static_cast<float>(ptr[0]) / 10000.0f;
       ++iter_x;
       *iter_y = static_cast<float>(ptr[1]) / 10000.0f;
       ++iter_y;
       *iter_z = static_cast<float>(ptr[2]) / 10000.0f;
       ++iter_z;
-#else
-      *iter_x = (1.0 * ptr[0]) / 1e4;
-      ++iter_x;
-      *iter_y = (1.0 * ptr[1]) / 1e4;
-      ++iter_y;
-      *iter_z = (1.0 * ptr[2]) / 1e4;
-      ++iter_z;
-#endif
 
       uint8_t r = ptr[3] & 0xff;
       uint8_t g = ptr[4] & 0xff;
@@ -984,14 +961,15 @@ public:
       data_logger_->enqueuePointCloudFrame(std::move(blob));
     }
 
-#ifdef ROS2
     xyzrgbacloud_pub_->publish(std::move(msg));
-#else
-    xyzrgbacloud_pub_.publish(msg);
-#endif
   }
 
+  //}
+
+  /* recordrotate() //{ */
+
   void recordrotate(capture_Image_List_t* stream) {
+
     if (data_logger_) {
       uint32_t data_len = stream->imageList[0].length;
       if (data_len == sizeof(ros_odom_convert_complete_t)) {
@@ -1137,9 +1115,13 @@ public:
     }
   }
 
+  //}
+
+  /* publishWiwc() //{ */
+
   // Publish WIWC data (T_CL and T_IL extrinsics) as a separate topic
-  //
   void publishWiwc(capture_Image_List_t* stream) {
+
     uint32_t data_len = stream->imageList[0].length;
     if (data_len != sizeof(ros_odom_convert_complete_t)) {
       return;
@@ -1181,6 +1163,10 @@ public:
 
     wiwc_publisher_->publish(msg);
   }
+
+  //}
+
+  /* publishOdometry() //{ */
 
   void publishOdometry(capture_Image_List_t* stream, OdometryType odom_type, bool show_path, bool show_camerapose) {
 
@@ -1401,6 +1387,10 @@ public:
     }
   }
 
+  //}
+
+  /* initialize_data_logger() //{ */
+
   void initialize_data_logger(std::string data_dir = "") {
 
     try {
@@ -1421,6 +1411,10 @@ public:
       data_logger_.reset();
     }
   }
+
+  //}
+
+  /* loadCameraParams() //{ */
 
   int loadCameraParams(const std::string& yaml_file) {
     try {
@@ -1525,6 +1519,10 @@ public:
     }
   }
 
+  //}
+
+  /* buildUndistortMap() //{ */
+
   void buildUndistortMap() {
 
     m_undistort_map_x.create(m_camera_params.height, m_camera_params.width, CV_32F);
@@ -1548,6 +1546,8 @@ public:
 
     m_undistort_map_init_success = true;
   }
+
+  //}
 
 private:
   // Add the following member variables
@@ -1629,8 +1629,6 @@ private:
     it_ = std::make_shared<image_transport::ImageTransport>(node_);
 
     imu_pub_                = node_->create_publisher<ros::Imu>("~/imu", qos_small);
-    rgb_pub_                = node_->create_publisher<ros::Image>("~/rgb/image_raw", qos_sensor);
-    compressed_rgb_pub_     = node_->create_publisher<sensor_msgs::msg::CompressedImage>("~/rgb/image_raw/compressed", qos_sensor);
     cloud_pub_              = node_->create_publisher<ros::PointCloud2>("~/cloud_raw", qos_sensor);
     xyzrgbacloud_pub_       = node_->create_publisher<ros::PointCloud2>("~/cloud_slam", qos_sensor);
     odom_publisher_         = node_->create_publisher<ros::Odometry>("~/odometry", qos_sensor);
@@ -1644,8 +1642,10 @@ private:
 
     /* odom_highfreq_publisher_ = node_->create_publisher<ros::Odometry>("odin1/odometry_highfreq", qos_small); */
     /* undistort_rgb_pub_ = node_->create_publisher<sensor_msgs::msg::Image>("odin1/image/undistorted", qos_sensor); */
+    /* rgb_pub_                = node_->create_publisher<ros::Image>("~/rgb/image_raw", qos_sensor); */
 
     undistort_rgb_pub_ = it_->advertiseCamera("~/rectified/image_raw", 1);
+    rgb_pub_           = it_->advertise("~/rgb/image_raw", 1);
 
     mrs_lib::PublisherHandlerOptions opts;
 
@@ -1661,10 +1661,12 @@ private:
   std::shared_ptr<image_transport::ImageTransport> it_;
 
   image_transport::CameraPublisher undistort_rgb_pub_;
+  image_transport::Publisher       rgb_pub_;
+
   /* rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr              undistort_rgb_pub_; */
+  /* rclcpp::Publisher<ros::Image>::SharedPtr                           rgb_pub_; */
 
   rclcpp::Publisher<ros::Imu>::SharedPtr                             imu_pub_;
-  rclcpp::Publisher<ros::Image>::SharedPtr                           rgb_pub_;
   rclcpp::Publisher<ros::PointCloud2>::SharedPtr                     cloud_pub_;
   rclcpp::Publisher<ros::PointCloud2>::SharedPtr                     xyzrgbacloud_pub_;
   rclcpp::Publisher<ros::Odometry>::SharedPtr                        odom_publisher_;
@@ -1672,7 +1674,6 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr        rendered_cloud_pub_;
   rclcpp::Publisher<PointCloud2Msg>::SharedPtr                       rgbcloud_pub_;
   rclcpp::Publisher<ImageMsg>::SharedPtr                             rgbFromnv12_pub_;
-  rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr    compressed_rgb_pub_;  // New compressed image publisher
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr              intensity_gray_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_camera_pose_visual_;
   rclcpp::Publisher<ros::Odometry>::SharedPtr                        wiwc_publisher_;
