@@ -39,7 +39,7 @@ register_keys:
 
   # TF from odom to base_link. Leave it on unless you specifically need it off.
   # ATTENTION: critical for rviz to show cloud_raw.
-  send_odom_baselink_tf: 1 # 0: off; 1: on.
+  send_odom_baselink_tf: 0 # 0: off; 1: on.
 
   # raw dtof data
   senddtof: 1             # 0: off; 1: on
