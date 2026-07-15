@@ -252,6 +252,7 @@ public:
   std::string odom_frame;
   std::string body_frame;
   std::string camera_frame;
+  bool        upsidedown;
 
   MultiSensorPublisher(rclcpp::Node::SharedPtr node) : node_(node), cameraposevisual_{1.0f, 0.0f, 0.0f, 1.0f} {
     initialize_publishers();
@@ -278,11 +279,13 @@ public:
     }
   }
 
-  void setFrames(const std::string map_frame, const std::string odom_frame, const std::string body_frame, const std::string camera_frame) {
+  void setParams(const bool upsidedown, const std::string map_frame, const std::string odom_frame, const std::string body_frame,
+                 const std::string camera_frame) {
     this->map_frame    = map_frame;
     this->odom_frame   = odom_frame;
     this->body_frame   = body_frame;
     this->camera_frame = camera_frame;
+    this->upsidedown   = upsidedown;
   }
 
   int get_pose_index() {
@@ -758,6 +761,10 @@ public:
 
       // convert back to bgr8
       cv::Mat decoded_image = cv::imdecode(jpeg_data, cv::IMREAD_COLOR);
+
+      if (upsidedown) {
+        cv::rotate(decoded_image, decoded_image, cv::ROTATE_180);
+      }
 
       cv_bridge::CvImage cv_image;
 

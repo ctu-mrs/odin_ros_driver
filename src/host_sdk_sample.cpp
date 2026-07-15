@@ -1471,6 +1471,7 @@ int main(int argc, char* argv[]) {
   std::string map_dir;
   std::string data_dir;
   std::string log_dir;
+  bool upsidedown;
 
   param_loader.loadParam("config", config_path);
   param_loader.loadParam("map_dir", map_dir);
@@ -1481,13 +1482,14 @@ int main(int argc, char* argv[]) {
   param_loader.loadParam("camera_frame", camera_frame);
   param_loader.loadParam("body_frame", body_frame);
   param_loader.loadParam("odom_frame", odom_frame);
+  param_loader.loadParam("upsidedown", upsidedown);
 
   if (!param_loader.loadedSuccessfully()) {
     RCLCPP_ERROR(node->get_logger(), "Could not load all parameters!");
     rclcpp::shutdown();
   }
 
-  g_ros_object->setFrames(map_frame, odom_frame, body_frame, camera_frame);
+  g_ros_object->setParams(upsidedown, map_frame, odom_frame, body_frame, camera_frame);
 
   // -----------------------------------------------------------------
   // AE/AWB debug services (ROS2). Allow a side terminal to tune the

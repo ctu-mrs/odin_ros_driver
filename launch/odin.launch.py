@@ -41,6 +41,18 @@ def generate_launch_description():
 
     # #} end of custom_config
     
+    # #{ upsidedown
+
+    upsidedown = LaunchConfiguration('upsidedown')
+
+    ld.add_action(DeclareLaunchArgument(
+        'upsidedown',
+        default_value="False",
+        description='upsidedown'
+    ))
+
+    # #} end of upsidedown
+
     ld.add_action(Node(
         package='odin_ros_driver',
         executable='host_sdk_sample',
@@ -48,6 +60,7 @@ def generate_launch_description():
         output='screen',
         namespace=uav_name,
         parameters=[
+            {'upsidedown': upsidedown},
             {'odom_frame': [uav_name, "/odin_odom"]},
             {'map_frame': [uav_name, "/odin_map"]},
             {'body_frame': [uav_name, "/odin_body"]},
