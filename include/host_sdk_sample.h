@@ -1252,19 +1252,14 @@ public:
 
         // Load the current world-frame velocities
         Eigen::Vector3d v_world(msg.twist.twist.linear.x, msg.twist.twist.linear.y, msg.twist.twist.linear.z);
-        Eigen::Vector3d w_world(msg.twist.twist.angular.x, msg.twist.twist.angular.y, msg.twist.twist.angular.z);
 
         // Rotate to body frame
         Eigen::Vector3d v_body = R_world_to_body * v_world;
-        Eigen::Vector3d w_body = R_world_to_body * w_world;
 
         // Overwrite the message with the correct body-frame velocities
         msg.twist.twist.linear.x  = v_body.x();
         msg.twist.twist.linear.y  = v_body.y();
         msg.twist.twist.linear.z  = v_body.z();
-        msg.twist.twist.angular.x = w_body.x();
-        msg.twist.twist.angular.y = w_body.y();
-        msg.twist.twist.angular.z = w_body.z();
 
         // ==========================================
         // 3. TRANSFORM COVARIANCE TO BODY FRAME
@@ -1274,9 +1269,8 @@ public:
         Eigen::Map<Eigen::Matrix<double, 6, 6, Eigen::RowMajor>> cov_world(msg.twist.covariance.data());
 
         // Construct the 6x6 block-diagonal rotation matrix
-        Eigen::Matrix<double, 6, 6> R_twist = Eigen::Matrix<double, 6, 6>::Zero();
+        Eigen::Matrix<double, 6, 6> R_twist = Eigen::Matrix<double, 6, 6>::Identity();
         R_twist.block<3, 3>(0, 0)           = R_world_to_body;
-        R_twist.block<3, 3>(3, 3)           = R_world_to_body;
 
         // Rotate the covariance matrix: Cov_body = R * Cov_world * R^T
         Eigen::Matrix<double, 6, 6> cov_body = R_twist * cov_world * R_twist.transpose();
