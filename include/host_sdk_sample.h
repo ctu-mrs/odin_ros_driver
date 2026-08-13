@@ -1622,10 +1622,10 @@ private:
   void initialize_publishers() {
 
     // Small data with queue depth 1
-    auto qos_small = rclcpp::QoS(4000).reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE).durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
+    auto qos_small = rclcpp::QoS(1).reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE).durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
 
     // Large sensor data with larger queue to avoid blocking
-    auto qos_sensor = rclcpp::QoS(5).reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE).durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
+    auto qos_sensor = rclcpp::QoS(1).reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE).durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
 
     it_ = std::make_shared<image_transport::ImageTransport>(node_);
 
@@ -1637,7 +1637,7 @@ private:
     pub_camera_pose_visual_ = node_->create_publisher<visualization_msgs::msg::MarkerArray>("~/camera_pose_visual", qos_sensor);
     rgbcloud_pub_           = node_->create_publisher<sensor_msgs::msg::PointCloud2>("~/cloud_render", qos_sensor);
     intensity_gray_pub_     = node_->create_publisher<sensor_msgs::msg::Image>("~/image/intensity_gray", qos_sensor);
-    wiwc_publisher_         = node_->create_publisher<ros::Odometry>("~/wiwc", qos_sensor);
+    wiwc_publisher_         = node_->create_publisher<ros::Odometry>("~/wiwc", qos_small);
     tf_broadcaster          = std::make_unique<tf2_ros::TransformBroadcaster>(node_);
     static_tf_broadcaster_  = std::make_shared<tf2_ros::StaticTransformBroadcaster>(node_);
 
