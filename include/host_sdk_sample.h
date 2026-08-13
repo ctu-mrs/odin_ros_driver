@@ -1257,9 +1257,9 @@ public:
         Eigen::Vector3d v_body = R_world_to_body * v_world;
 
         // Overwrite the message with the correct body-frame velocities
-        msg.twist.twist.linear.x  = v_body.x();
-        msg.twist.twist.linear.y  = v_body.y();
-        msg.twist.twist.linear.z  = v_body.z();
+        msg.twist.twist.linear.x = v_body.x();
+        msg.twist.twist.linear.y = v_body.y();
+        msg.twist.twist.linear.z = v_body.z();
 
         // ==========================================
         // 3. TRANSFORM COVARIANCE TO BODY FRAME
