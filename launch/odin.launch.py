@@ -64,6 +64,7 @@ def generate_launch_description():
             {'odom_frame': [uav_name, "/odin_odom"]},
             {'map_frame': [uav_name, "/odin_map"]},
             {'body_frame': [uav_name, "/odin_body"]},
+            {'lidar_frame': [uav_name, "/odin_lidar"]},
             {'camera_frame': [uav_name, "/odin_camera"]},
             {'log_dir': "/tmp/odin/log"},
             {'map_dir': "/tmp/odin/map"},

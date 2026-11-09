@@ -250,7 +250,8 @@ class MultiSensorPublisher {
 public:
   std::string map_frame;
   std::string odom_frame;
-  std::string body_frame;
+  std::string body_frame;  // IMU frame, child of odom_frame
+  std::string lidar_frame;
   std::string camera_frame;
   bool        upsidedown;
 
@@ -280,12 +281,17 @@ public:
   }
 
   void setParams(const bool upsidedown, const std::string map_frame, const std::string odom_frame, const std::string body_frame,
-                 const std::string camera_frame) {
+                 const std::string lidar_frame, const std::string camera_frame) {
     this->map_frame    = map_frame;
     this->odom_frame   = odom_frame;
     this->body_frame   = body_frame;
+    this->lidar_frame  = lidar_frame;
     this->camera_frame = camera_frame;
     this->upsidedown   = upsidedown;
+
+    // publish the nominal body->lidar extrinsic right away, it gets refined once WIWC data arrive
+    std::lock_guard<std::mutex> lock(extrinsics_mutex_);
+    publishLidarStaticTf();
   }
 
   int get_pose_index() {
@@ -543,7 +549,7 @@ public:
 
       // Create and publish RGB point cloud
       PointCloud2Msg output_msg;
-      output_msg.header.frame_id = body_frame;
+      output_msg.header.frame_id = lidar_frame;
       output_msg.header.stamp    = rgb_msg->header.stamp;  // Use original image timestamp
       output_msg.height          = 1;
       output_msg.width           = valid_point_num;
@@ -597,7 +603,7 @@ public:
     auto msg = std::make_shared<sensor_msgs::msg::PointCloud2>();
 
     // Set message header
-    msg->header.frame_id = body_frame;
+    msg->header.frame_id = lidar_frame;
     msg->header.stamp    = make_aligned_stamp(cloud.timestamp, node_);
 
     msg->height       = cloud.height;
@@ -1175,6 +1181,14 @@ public:
     }
 
     wiwc_publisher_->publish(msg);
+
+    // T_IL (pose of the lidar in the imu/body frame) is used directly, without inverting
+    Eigen::Matrix4d T_il = Eigen::Matrix4d::Identity();
+    for (int i = 0; i < 12; ++i) {
+      T_il(i / 4, i % 4) = msg.twist.covariance[i];
+    }
+
+    updateLidarExtrinsic(T_il);
   }
 
   //}
@@ -1361,9 +1375,12 @@ public:
           // camera pose visualization (ROS2)
           Eigen::Vector3d    P(msg.pose.pose.position.x, msg.pose.pose.position.y, msg.pose.pose.position.z);
           Eigen::Quaterniond R(msg.pose.pose.orientation.w, msg.pose.pose.orientation.x, msg.pose.pose.orientation.y, msg.pose.pose.orientation.z);
-          if (extrinsic_ok_) {
-            P = P + R * t_ic_;
-            R = R * R_ic_;
+          {
+            std::lock_guard<std::mutex> lock(extrinsics_mutex_);
+            if (extrinsic_ok_) {
+              P = P + R * t_ic_;
+              R = R * R_ic_;
+            }
           }
           cameraposevisual_.reset();
           cameraposevisual_.add_pose(P, R);
@@ -1467,9 +1484,9 @@ public:
           m_camera_params.k2, m_camera_params.k3, m_camera_params.k4, m_camera_params.k5, m_camera_params.k6, m_camera_params.k7);
 
       // Load extrinsic Tcl_0 (camera to lidar)
-      extrinsic_ok_ = false;
       if (config["Tcl_0"]) {
         auto T = config["Tcl_0"];
+        std::lock_guard<std::mutex> lock(extrinsics_mutex_);
         if (T.IsSequence() && T.size() == 16) {
           Eigen::Matrix4d Tcl;
           for (int i = 0; i < 16; ++i)
@@ -1478,42 +1495,9 @@ public:
         }
         std::cout << "Tcl: " << T_cl_ << std::endl;
 
-        Eigen::Matrix4d Tic = T_il_ * T_cl_.inverse();
-        Eigen::Matrix3d Ric = Tic.block<3, 3>(0, 0);
-        Eigen::Vector3d tic = Tic.block<3, 1>(0, 3);
-        R_ic_               = Eigen::Quaterniond(Ric);
-        t_ic_               = tic;
-        extrinsic_ok_       = true;
-
-        // Construct the TF message
-        geometry_msgs::msg::TransformStamped t;
-
-        // Use the current time (static transforms are typically latched, but need a valid stamp)
-        t.header.stamp = node_->get_clock()->now();
-
-        // The parent frame (usually the IMU or Lidar/Body frame in this context)
-        t.header.frame_id = body_frame;
-
-        // The child frame (the standard optical frame with Z pointing forward)
-        t.child_frame_id = camera_frame;
-
-        // Set the translation from your Eigen vector
-        t.transform.translation.x = t_ic_.x();
-        t.transform.translation.y = t_ic_.y();
-        t.transform.translation.z = t_ic_.z();
-
-        // Set the rotation from your Eigen quaternion
-        // Note: Eigen::Quaterniond stores (w, x, y, z) internally, but the accessor
-        // methods x(), y(), z(), w() safely map to the correct ROS fields.
-        t.transform.rotation.x = R_ic_.x();
-        t.transform.rotation.y = R_ic_.y();
-        t.transform.rotation.z = R_ic_.z();
-        t.transform.rotation.w = R_ic_.w();
-
-        // Publish the static transform
-        static_tf_broadcaster_->sendTransform(t);
-
-        RCLCPP_INFO(node_->get_logger(), "Published static TF from %s to %s", t.header.frame_id.c_str(), t.child_frame_id.c_str());
+        has_T_cl_ = true;
+        updateCameraExtrinsic();
+        publishCameraStaticTf();
       }
 
       m_cam_init_success = true;
@@ -1611,8 +1595,123 @@ private:
   Eigen::Quaterniond R_ic_{Eigen::Quaterniond::Identity()};
   Eigen::Vector3d    t_ic_{Eigen::Vector3d::Zero()};
   bool               extrinsic_ok_{false};
-  Eigen::Matrix4d    T_il_ = (Eigen::Matrix4d() << 1.0, 0.0, 0.0, 0.00347, 0.0, 1.0, 0.0, 0.03447, 0.0, 0.0, 1.0, 0.02174, 0.0, 0.0, 0.0, 1.0).finished();
-  Eigen::Matrix4d    T_cl_ = Eigen::Matrix4d::Identity();  // Camera->Lidar from YAML
+  // nominal body(imu)->lidar extrinsic, used until the device sends T_IL over WIWC
+  Eigen::Matrix4d T_il_ = (Eigen::Matrix4d() << 1.0, 0.0, 0.0, 0.00347, 0.0, 1.0, 0.0, 0.03447, 0.0, 0.0, 1.0, 0.02174, 0.0, 0.0, 0.0, 1.0).finished();
+  Eigen::Matrix4d T_cl_ = Eigen::Matrix4d::Identity();  // Camera<-Lidar from calib.yaml (optical convention)
+  bool            has_T_cl_ = false;
+  std::mutex      extrinsics_mutex_;  // guards T_il_, T_cl_, R_ic_, t_ic_, extrinsic_ok_, has_T_cl_
+
+  /* updateLidarExtrinsic() //{ */
+
+  // Called with the T_IL from WIWC. Republishes the static TFs only when the extrinsic actually changes.
+  void updateLidarExtrinsic(const Eigen::Matrix4d& T_il) {
+
+    if (!T_il.allFinite()) {
+      return;
+    }
+
+    Eigen::Matrix3d R = T_il.block<3, 3>(0, 0);
+    if (std::abs(R.determinant() - 1.0) > 1e-3) {
+      return;  // not a valid rotation (e.g., zeroed data)
+    }
+
+    std::lock_guard<std::mutex> lock(extrinsics_mutex_);
+
+    const double dt = (T_il.block<3, 1>(0, 3) - T_il_.block<3, 1>(0, 3)).norm();
+    const double dr = Eigen::AngleAxisd(T_il_.block<3, 3>(0, 0).transpose() * R).angle();
+
+    if (lidar_extrinsic_from_device_ && dt < 1e-4 && dr < 1e-4) {
+      return;
+    }
+
+    T_il_                        = T_il;
+    lidar_extrinsic_from_device_ = true;
+
+    RCLCPP_INFO(node_->get_logger(), "Updated body->lidar extrinsic from device: t = [%.5f, %.5f, %.5f]", T_il_(0, 3), T_il_(1, 3), T_il_(2, 3));
+
+    publishLidarStaticTf();
+    updateCameraExtrinsic();
+  }
+
+  //}
+
+  /* updateCameraExtrinsic() //{ */
+
+  // camera pose in the body frame, used by the camera pose visualization. Expects extrinsics_mutex_ to be locked.
+  void updateCameraExtrinsic() {
+
+    if (!has_T_cl_) {
+      return;
+    }
+
+    Eigen::Matrix4d Tic = T_il_ * T_cl_.inverse();
+    R_ic_               = Eigen::Quaterniond(Eigen::Matrix3d(Tic.block<3, 3>(0, 0))).normalized();
+    t_ic_               = Tic.block<3, 1>(0, 3);
+    extrinsic_ok_       = true;
+  }
+
+  //}
+
+  /* publishLidarStaticTf() //{ */
+
+  // body(imu) -> lidar. Expects extrinsics_mutex_ to be locked.
+  void publishLidarStaticTf() {
+
+    if (body_frame.empty() || lidar_frame.empty()) {
+      return;
+    }
+
+    Eigen::Quaterniond q(Eigen::Matrix3d(T_il_.block<3, 3>(0, 0)));
+    q.normalize();
+
+    geometry_msgs::msg::TransformStamped t;
+    t.header.stamp            = node_->get_clock()->now();
+    t.header.frame_id         = body_frame;
+    t.child_frame_id          = lidar_frame;
+    t.transform.translation.x = T_il_(0, 3);
+    t.transform.translation.y = T_il_(1, 3);
+    t.transform.translation.z = T_il_(2, 3);
+    t.transform.rotation.x    = q.x();
+    t.transform.rotation.y    = q.y();
+    t.transform.rotation.z    = q.z();
+    t.transform.rotation.w    = q.w();
+
+    static_tf_broadcaster_->sendTransform(t);
+
+    RCLCPP_INFO(node_->get_logger(), "Published static TF from %s to %s", t.header.frame_id.c_str(), t.child_frame_id.c_str());
+  }
+
+  //}
+
+  /* publishCameraStaticTf() //{ */
+
+  // lidar -> camera (optical frame, z forward), straight from the factory calibration. Expects extrinsics_mutex_ to be locked.
+  void publishCameraStaticTf() {
+
+    Eigen::Matrix4d    T_lc = T_cl_.inverse();
+    Eigen::Quaterniond q(Eigen::Matrix3d(T_lc.block<3, 3>(0, 0)));
+    q.normalize();
+
+    geometry_msgs::msg::TransformStamped t;
+    t.header.stamp            = node_->get_clock()->now();
+    t.header.frame_id         = lidar_frame;
+    t.child_frame_id          = camera_frame;
+    t.transform.translation.x = T_lc(0, 3);
+    t.transform.translation.y = T_lc(1, 3);
+    t.transform.translation.z = T_lc(2, 3);
+    t.transform.rotation.x    = q.x();
+    t.transform.rotation.y    = q.y();
+    t.transform.rotation.z    = q.z();
+    t.transform.rotation.w    = q.w();
+
+    static_tf_broadcaster_->sendTransform(t);
+
+    RCLCPP_INFO(node_->get_logger(), "Published static TF from %s to %s", t.header.frame_id.c_str(), t.child_frame_id.c_str());
+  }
+
+  //}
+
+  bool lidar_extrinsic_from_device_ = false;
                                                            //
   std::vector<sensor_msgs::msg::PointCloud2> getIntensityCloudQueueSnapshot() {
     std::lock_guard<std::mutex>                lock(pcd_queue_mutex_);

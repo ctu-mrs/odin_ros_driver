@@ -315,6 +315,7 @@ std::string config_dir;
 std::string map_frame;
 std::string odom_frame;
 std::string body_frame;
+std::string lidar_frame;
 std::string camera_frame;
 
 /* signal_handler() //{ */
@@ -1540,6 +1541,7 @@ int main(int argc, char* argv[]) {
   param_loader.loadParam("map_frame", map_frame);
   param_loader.loadParam("camera_frame", camera_frame);
   param_loader.loadParam("body_frame", body_frame);
+  param_loader.loadParam("lidar_frame", lidar_frame);
   param_loader.loadParam("odom_frame", odom_frame);
   param_loader.loadParam("upsidedown", upsidedown);
 
@@ -1548,7 +1550,7 @@ int main(int argc, char* argv[]) {
     rclcpp::shutdown();
   }
 
-  g_ros_object->setParams(upsidedown, map_frame, odom_frame, body_frame, camera_frame);
+  g_ros_object->setParams(upsidedown, map_frame, odom_frame, body_frame, lidar_frame, camera_frame);
 
   // -----------------------------------------------------------------
   // AE/AWB debug services (ROS2). Allow a side terminal to tune the
