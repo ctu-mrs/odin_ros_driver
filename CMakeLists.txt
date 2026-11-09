@@ -120,6 +120,9 @@ rosidl_generate_interfaces(${PROJECT_NAME}
     "srv/GetAwb.srv"
     "srv/SetAe.srv"
     "srv/SetAwb.srv"
+    "srv/GetDeviceLogs.srv"
+    "srv/SaveMap.srv"
+    "srv/ResetAlgo.srv"
 )
 
 # ===== Targets Configuration =====
