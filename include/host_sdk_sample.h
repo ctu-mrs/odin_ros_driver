@@ -253,7 +253,6 @@ public:
   std::string body_frame;  // IMU frame, child of odom_frame
   std::string lidar_frame;
   std::string camera_frame;
-  bool        upsidedown;
 
   MultiSensorPublisher(rclcpp::Node::SharedPtr node) : node_(node), cameraposevisual_{1.0f, 0.0f, 0.0f, 1.0f} {
     initialize_publishers();
@@ -280,14 +279,13 @@ public:
     }
   }
 
-  void setParams(const bool upsidedown, const std::string map_frame, const std::string odom_frame, const std::string body_frame,
-                 const std::string lidar_frame, const std::string camera_frame) {
+  void setFrames(const std::string map_frame, const std::string odom_frame, const std::string body_frame, const std::string lidar_frame,
+                 const std::string camera_frame) {
     this->map_frame    = map_frame;
     this->odom_frame   = odom_frame;
     this->body_frame   = body_frame;
     this->lidar_frame  = lidar_frame;
     this->camera_frame = camera_frame;
-    this->upsidedown   = upsidedown;
 
     // publish the nominal body->lidar extrinsic right away, it gets refined once WIWC data arrive
     std::lock_guard<std::mutex> lock(extrinsics_mutex_);
@@ -773,10 +771,6 @@ public:
     if (decoded_image.empty()) {
       RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000, "Failed to decode RGB image (format=%u)", image.format);
       return;
-    }
-
-    if (upsidedown) {
-      cv::rotate(decoded_image, decoded_image, cv::ROTATE_180);
     }
 
     cv_bridge::CvImage cv_image;
