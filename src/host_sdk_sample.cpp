@@ -51,9 +51,12 @@ limitations under the License.
 #include "odin_ros_driver/srv/get_awb.hpp"
 #include "odin_ros_driver/srv/set_ae.hpp"
 #include "odin_ros_driver/srv/set_awb.hpp"
-#define ros_driver_version "0.11.0"
+#include "odin_ros_driver/srv/get_device_logs.hpp"
+#include "odin_ros_driver/srv/save_map.hpp"
+#include "odin_ros_driver/srv/reset_algo.hpp"
+#define ros_driver_version "0.14.4"
 #define required_firmware_version_major 0
-#define required_firmware_version_minor 12
+#define required_firmware_version_minor 13
 #define required_firmware_version_patch 0
 
 #include <mrs_lib/param_loader.h>
@@ -143,6 +146,12 @@ int g_use_host_ros_time              = 0;
 int g_save_log                       = 0;
 int g_cloud_raw_confidence_threshold = 35;
 int g_dtof_fps                       = 145;  // DTOF sensor frame rate: 100 (10fps) or 145 (14.5fps)
+
+// RGB camera configuration, must be paired with g_dtof_fps (see control_command.yaml)
+int g_rgb_format = 1;     // 0: NV12; 1: MJPEG
+int g_rgb_width  = 1600;  // Image width in pixels
+int g_rgb_height = 1296;  // Image height in pixels
+int g_rgb_fps    = 100;   // Frame rate * 10
 
 std::filesystem::path log_root_dir_;
 int                   g_custom_map_mode                    = 0;
@@ -392,6 +401,52 @@ static void custom_parameter_monitor() {
 
 //}
 
+/* start_map_save() //{ */
+
+// Trigger the device-side map save and fetch the result in a background thread.
+// The whole flow (set -> poll -> fetch) is handled by the SDK's lidar_save_map().
+// Returns false if another map transfer is already running.
+static bool start_map_save() {
+
+  if (g_map_transfer_in_progress.load()) {
+    return false;
+  }
+
+  auto        now = std::chrono::system_clock::now();
+  std::time_t t   = std::chrono::system_clock::to_time_t(now);
+  std::tm     tm{};
+  localtime_r(&t, &tm);
+  char map_save_time[32];
+  std::strftime(map_save_time, sizeof(map_save_time), "%Y%m%d_%H%M%S", &tm);
+
+  std::string map_dir  = g_mapping_result_dest_dir != "" ? g_mapping_result_dest_dir : map_root_dir_.string();
+  std::string map_name = g_mapping_result_file_name != "" ? g_mapping_result_file_name : "map_" + std::string(map_save_time) + ".bin";
+
+  RCLCPP_INFO(rclcpp::get_logger("map_transfer"), "Map save triggered, will transfer to [%s/%s]", map_dir.c_str(), map_name.c_str());
+
+  // Mark transfer as in-progress BEFORE spawning the thread to avoid
+  // race conditions with subsequent save requests.
+  g_map_transfer_in_progress.store(true);
+
+  std::thread([map_dir, map_name]() {
+    // 0 = use SDK default generation timeout (300s).
+    int ret = lidar_save_map(odinDevice, map_dir.c_str(), map_name.c_str(), 0);
+    g_map_transfer_in_progress.store(false);
+
+    if (ret == 0) {
+      RCLCPP_INFO(rclcpp::get_logger("map_transfer"), "Map transfer completed: %s/%s", map_dir.c_str(), map_name.c_str());
+    } else if (ret == -2) {
+      RCLCPP_WARN(rclcpp::get_logger("map_transfer"), "Map transfer skipped: device is busy with another transfer");
+    } else {
+      RCLCPP_WARN(rclcpp::get_logger("map_transfer"), "Map transfer failed, error code: %d", ret);
+    }
+  }).detach();
+
+  return true;
+}
+
+//}
+
 /* process_command_file() //{ */
 
 // Process command from file
@@ -448,47 +503,20 @@ static void process_command_file() {
         // generation on the device side after it already completed once.
         if (param_name == "save_map" && value == 1) {
           RCLCPP_INFO(rclcpp::get_logger("command_processor"), "Successfully set %s = %d", param_name.c_str(), value);
-          {
-            auto        now = std::chrono::system_clock::now();
-            std::time_t t   = std::chrono::system_clock::to_time_t(now);
-            std::tm     tm{};
-#ifdef _WIN32
-            localtime_s(&tm, &t);
-#else
-            localtime_r(&t, &tm);
-#endif
-            char map_save_time[32];
-            std::strftime(map_save_time, sizeof(map_save_time), "%Y%m%d_%H%M%S", &tm);
-
-            std::string map_dir  = g_mapping_result_dest_dir != "" ? g_mapping_result_dest_dir : map_root_dir_.string();
-            std::string map_name = g_mapping_result_file_name != "" ? g_mapping_result_file_name : "map_" + std::string(map_save_time) + ".bin";
-
-            RCLCPP_INFO(rclcpp::get_logger("command_processor"), "Map save triggered, will transfer to [%s/%s]", map_dir.c_str(), map_name.c_str());
-
-            // Mark transfer as in-progress BEFORE spawning the thread to avoid
-            // race conditions with subsequent set save_map=1 calls.
-            g_map_transfer_in_progress.store(true);
-
-            // Run save-map in a background thread so we don't block the command processor.
-            // All the orchestration (trigger -> poll -> fetch) is now handled inside
-            // the SDK's lidar_save_map() one-shot API, so this side just blocks on it
-            // and reports the final outcome.
-            std::thread([map_dir, map_name]() {
-              // 0 = use SDK default generation timeout (120s).
-              int ret = lidar_save_map(odinDevice, map_dir.c_str(), map_name.c_str(), 0);
-              // Always clear the in-progress flag when this thread exits
-              g_map_transfer_in_progress.store(false);
-
-              if (ret == 0) {
-                RCLCPP_INFO(rclcpp::get_logger("map_transfer"), "Map transfer completed: %s/%s", map_dir.c_str(), map_name.c_str());
-              } else if (ret == -2) {
-                RCLCPP_WARN(rclcpp::get_logger("map_transfer"), "Map transfer skipped: device is busy with another transfer");
-              } else {
-                RCLCPP_WARN(rclcpp::get_logger("map_transfer"), "Map transfer failed, error code: %d", ret);
-              }
-            }).detach();
-          }
+          start_map_save();
           return;  // save_map=1 handled, skip the generic set path below
+        }
+
+        // "spad_filter" is a host-side SDK toggle (SPAD crosstalk filter on the raw
+        // DTOF cloud), not a device parameter.
+        if (param_name == "spad_filter") {
+          int ret = lidar_enable_spad_filter(value);
+          if (ret == 0) {
+            RCLCPP_INFO(rclcpp::get_logger("command_processor"), "Successfully set %s = %d", param_name.c_str(), value);
+          } else {
+            RCLCPP_ERROR(rclcpp::get_logger("command_processor"), "Failed to set %s = %d, error: %d", param_name.c_str(), value, ret);
+          }
+          return;
         }
 
         // Generic path for all other parameters (and save_map=0 / save_map=N>1).
@@ -1201,7 +1229,11 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
 
     std::string calib_config = config_dir + "/calib.yaml";
     calib_file_              = calib_config;
-    if (get_calib_file) {
+    // Also fetch when calib.yaml is missing, so resuming a running device (STREAM_STOPPED)
+    // with a fresh config_dir still produces the calibration file.
+    if (get_calib_file || !std::filesystem::exists(calib_config)) {
+      std::error_code ec_mkdir;
+      std::filesystem::create_directories(config_dir, ec_mkdir);
       if (lidar_get_calib_file(odinDevice, config_dir.c_str())) {
         RCLCPP_ERROR(rclcpp::get_logger("device_cb"), "Failed to get calibration file");
         lidar_close_device(odinDevice);
@@ -1275,6 +1307,24 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
     // Log the configured frame rate
     RCLCPP_INFO(rclcpp::get_logger("ros[host_sdk_sample]"), "DTOF sensor frame rate set to %.1f fps", g_dtof_fps / 10.0);
 
+    // Set RGB camera configuration (format, resolution, frame rate).
+    // Must be called after lidar_set_depth_parameter() and before lidar_start_stream().
+    if (g_sendrgb) {
+      lidar_rgb_para_t rgbPara;
+      rgbPara.format = (lidar_rgb_format_e)g_rgb_format;
+      rgbPara.width  = (uint32_t)g_rgb_width;
+      rgbPara.height = (uint32_t)g_rgb_height;
+      rgbPara.fps    = (uint32_t)g_rgb_fps;
+      int rgb_rc     = lidar_set_rgb_parameter(odinDevice, &rgbPara);
+      if (rgb_rc) {
+        RCLCPP_WARN(rclcpp::get_logger("ros[host_sdk_sample]"), "set RGB parameter failed (rc=%d): format=%d, %dx%d@%d", rgb_rc, g_rgb_format, g_rgb_width,
+                    g_rgb_height, g_rgb_fps);
+      } else {
+        RCLCPP_INFO(rclcpp::get_logger("ros[host_sdk_sample]"), "RGB camera configured: format=%d, %dx%d@%.1ffps", g_rgb_format, g_rgb_width, g_rgb_height,
+                    g_rgb_fps / 10.0);
+      }
+    }
+
 
     if (lidar_set_mode(odinDevice, type)) {
       RCLCPP_ERROR(rclcpp::get_logger("device_cb"), "Set mode failed");
@@ -1291,16 +1341,9 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
 
     RCLCPP_INFO(rclcpp::get_logger("device_cb"), "Custom map mode: %d", g_custom_map_mode);
 
-    if (g_custom_map_mode == 1) {
-      int save_map_init_value = 0;
-      int result              = lidar_set_custom_parameter(odinDevice, "save_map", &save_map_init_value, sizeof(int));
-
-      if (result == 0) {
-        RCLCPP_INFO(rclcpp::get_logger("command_processor"), "Successfully initialized %s = %d", "save_map", save_map_init_value);
-      } else {
-        RCLCPP_ERROR(rclcpp::get_logger("command_processor"), "Failed to initialize %s = %d, error: %d", "save_map", save_map_init_value, result);
-      }
-    } else if (g_custom_map_mode == 2) {
+    // save_map=0 initialization is deferred until after the stream starts,
+    // because the device only accepts this parameter while streaming.
+    if (g_custom_map_mode == 2) {
       bool result    = false;
       int  retryTime = 3;
       if (g_relocalization_map_abs_path != "" && std::filesystem::exists(g_relocalization_map_abs_path)) {
@@ -1407,6 +1450,18 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
       lidar_deactivate_stream_type(odinDevice, LIDAR_DT_SLAM_CLOUD);
     }
 
+    // Clear any residual save_map=1 from a previous session (device accepts it only while streaming)
+    if (g_custom_map_mode == 1) {
+      int save_map_init_value = 0;
+      int result              = lidar_set_custom_parameter(odinDevice, "save_map", &save_map_init_value, sizeof(int));
+
+      if (result == 0) {
+        RCLCPP_INFO(rclcpp::get_logger("device_cb"), "Successfully initialized %s = %d", "save_map", save_map_init_value);
+      } else {
+        RCLCPP_ERROR(rclcpp::get_logger("device_cb"), "Failed to initialize %s = %d, error: %d", "save_map", save_map_init_value, result);
+      }
+    }
+
     software_connect_timing = false;
     deviceConnected         = true;
     deviceDisconnected      = false;
@@ -1425,9 +1480,13 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
 
     RCLCPP_INFO(rclcpp::get_logger("device_cb"), "Command interface ready. Use: echo 'set save_map 1' > %s", g_command_file_path.c_str());
 
-    bool load_status = g_ros_object->loadCameraParams(calib_config);
-    if (g_sendrgb_undistort && load_status == 0) {
-      g_ros_object->buildUndistortMap();
+    if (std::filesystem::exists(calib_config)) {
+      bool load_status = g_ros_object->loadCameraParams(calib_config);
+      if (g_sendrgb_undistort && load_status == 0) {
+        g_ros_object->buildUndistortMap();
+      }
+    } else {
+      RCLCPP_WARN(rclcpp::get_logger("device_cb"), "Calibration file not found: %s, skipping camera parameters", calib_config.c_str());
     }
 
     RCLCPP_INFO(rclcpp::get_logger("device_cb"), "Software connection successful in %ld seconds",
@@ -1590,9 +1649,60 @@ int main(int argc, char* argv[]) {
         res->success          = (rc == 0);
       });
 
+  auto srv_get_device_logs = node->create_service<odin_ros_driver::srv::GetDeviceLogs>(
+      "~/get_device_logs",
+      [](const std::shared_ptr<odin_ros_driver::srv::GetDeviceLogs::Request> req, std::shared_ptr<odin_ros_driver::srv::GetDeviceLogs::Response> res) {
+        if (odinDevice == nullptr) {
+          res->success = false;
+          res->rc      = -100;
+          return;
+        }
+        int rc       = lidar_get_logs(odinDevice, req->dest_dir.c_str());
+        res->rc      = rc;
+        res->success = (rc == 0);
+      });
+
+  // value == 1 starts the save-map flow in the background; other values are forwarded as the "save_map" custom parameter
+  auto srv_save_map = node->create_service<odin_ros_driver::srv::SaveMap>(
+      "~/save_map", [](const std::shared_ptr<odin_ros_driver::srv::SaveMap::Request> req, std::shared_ptr<odin_ros_driver::srv::SaveMap::Response> res) {
+        if (odinDevice == nullptr) {
+          res->success = false;
+          res->rc      = -100;
+          return;
+        }
+        int value = req->value;
+        if (value == 1) {
+          if (!start_map_save()) {
+            RCLCPP_WARN(rclcpp::get_logger("service"), "Map transfer already in progress, ignoring save_map=1 request");
+            res->rc      = -2;
+            res->success = false;
+            return;
+          }
+          res->rc      = 0;
+          res->success = true;
+        } else {
+          int rc       = lidar_set_custom_parameter(odinDevice, "save_map", &value, sizeof(int));
+          res->rc      = rc;
+          res->success = (rc == 0);
+        }
+      });
+
+  auto srv_reset_algo = node->create_service<odin_ros_driver::srv::ResetAlgo>(
+      "~/reset_algo", [](const std::shared_ptr<odin_ros_driver::srv::ResetAlgo::Request> req, std::shared_ptr<odin_ros_driver::srv::ResetAlgo::Response> res) {
+        if (odinDevice == nullptr) {
+          res->success = false;
+          res->rc      = -100;
+          return;
+        }
+        int value    = req->value;
+        int rc       = lidar_set_custom_parameter(odinDevice, "algo_reset", &value, sizeof(int));
+        res->rc      = rc;
+        res->success = (rc == 0);
+      });
+
   RCLCPP_INFO(node->get_logger(),
-              "AE/AWB debug services ready: "
-              "~/get_ae ~/get_awb ~/set_ae ~/set_awb");
+              "Services ready: "
+              "~/get_ae ~/get_awb ~/set_ae ~/set_awb ~/get_device_logs ~/save_map ~/reset_algo");
 
   // Register signal handlers for Ctrl+C
   signal(SIGINT, signal_handler);
@@ -1629,6 +1739,10 @@ int main(int argc, char* argv[]) {
     g_cloud_raw_confidence_threshold = get_key_value("cloud_raw_confidence_threshold", 35);
     g_rosNodeControlImpl.setCloudRawConfidenceThreshold(g_cloud_raw_confidence_threshold);
     g_dtof_fps              = get_key_value("dtof_fps", 145);  // Read DTOF frame rate from config (100=10fps, 145=14.5fps)
+    g_rgb_format            = get_key_value("rgb_format", 1);     // 0: NV12; 1: MJPEG
+    g_rgb_width             = get_key_value("rgb_width", 1600);
+    g_rgb_height            = get_key_value("rgb_height", 1296);
+    g_rgb_fps               = get_key_value("rgb_fps", g_dtof_fps == 145 ? 145 : 100);  // must pair with dtof_fps
     g_sendodom              = get_key_value("sendodom", 1);
     g_send_odom_baselink_tf = get_key_value("send_odom_baselink_tf", 0);
     g_sendcloudslam         = get_key_value("sendcloudslam", 0);
@@ -1695,6 +1809,11 @@ int main(int argc, char* argv[]) {
       RCLCPP_ERROR(node->get_logger(), "Lidar system init failed");
       return -1;
     }
+
+    // Re-arm SIGINT/SIGTERM: lidar_system_init() installs the SDK's crash handler,
+    // which overrides ours and prints a backtrace on Ctrl+C.
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
 
     // Configure SDK IMU smooth sending AFTER lidar_system_init
     // SDK now defaults to disabled, only enable if configured

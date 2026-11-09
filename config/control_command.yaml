@@ -48,7 +48,21 @@ register_keys:
   # dtof sensor frame rate. Supported values: 100 (10fps) or 145 (14.5fps)
   # Higher frame rate provides smoother point cloud data but may increase data bandwidth
   # Note: value is multiplied by 10 (e.g., 145 means 14.5fps)
-  dtof_fps: 100           # 100: 10fps; 145: 14.5fps 290: dtof 10hz + camera 29hz
+  dtof_fps: 100           # 100: 10fps; 145: 14.5fps
+
+  # RGB camera configuration, applied via lidar_set_rgb_parameter() before streaming starts.
+  # ATTENTION: invalid combinations cause device connection failure.
+  # RGB frame rate is coupled with the DTOF frame rate, use one of these pairs:
+  #
+  #   rgb_fps | dtof_fps | RGB actual rate | DTOF actual rate
+  #   --------+----------+-----------------+-----------------
+  #   100     | 100      | 10.264 Hz       | 10.0 Hz
+  #   145     | 145      | 14.472 Hz       | 14.5 Hz
+  #   290     | 100      | 28.92 Hz        | 10.0 Hz
+  rgb_format: 1           # 0: NV12; 1: MJPEG
+  rgb_width: 1600         # image width in pixels
+  rgb_height: 1296        # image height in pixels
+  rgb_fps: 100            # frame rate * 10
 
   # slam cloud data
   sendcloudslam: 0        # 0: off; 1: on

@@ -752,123 +752,129 @@ public:
 
     buffer_List_t& image = stream->imageList[0];
 
-    // old version yuv data
-    if (image.length == image.width * image.height * 3 / 2) {
-      RCLCPP_INFO(rclcpp::get_logger("publishRgb"), "old format rgb data, please upgrade device firmware");
-    } else {  // new version jpeg data
+    cv::Mat        decoded_image;
+    const uint8_t* raw_data = static_cast<const uint8_t*>(image.pAddr);
 
-      std::vector<uint8_t> jpeg_data(static_cast<uint8_t*>(image.pAddr), static_cast<uint8_t*>(image.pAddr) + image.length);
+    if (image.format == LIDAR_RGB_FMT_NV12) {
+      // NV12: Y plane (width*height) followed by interleaved UV plane (width*height/2)
+      cv::Mat nv12_mat(image.height * 3 / 2, image.width, CV_8UC1, image.pAddr);
+      cv::cvtColor(nv12_mat, decoded_image, cv::COLOR_YUV2BGR_NV12);
+    } else {
+      // MJPEG
+      decoded_image = cv::imdecode(cv::Mat(1, image.length, CV_8UC1, image.pAddr), cv::IMREAD_COLOR);
+    }
 
-      // convert back to bgr8
-      cv::Mat decoded_image = cv::imdecode(jpeg_data, cv::IMREAD_COLOR);
+    if (decoded_image.empty()) {
+      RCLCPP_WARN_THROTTLE(node_->get_logger(), *node_->get_clock(), 1000, "Failed to decode RGB image (format=%u)", image.format);
+      return;
+    }
 
-      if (upsidedown) {
-        cv::rotate(decoded_image, decoded_image, cv::ROTATE_180);
+    if (upsidedown) {
+      cv::rotate(decoded_image, decoded_image, cv::ROTATE_180);
+    }
+
+    cv_bridge::CvImage cv_image;
+
+    cv_image.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp, node_);
+    cv_image.encoding     = "bgr8";
+    cv_image.image        = decoded_image;
+
+    if (g_sendcloudrender) {
+      std::lock_guard<std::mutex> lock(rgb_queue_mutex_);
+      if (rgb_image_queue_.size() >= 10) {
+        rgb_image_queue_.pop_front();
       }
+      rgb_image_queue_.push_back(cv_image.toImageMsg());
+    }
 
-      cv_bridge::CvImage cv_image;
+    // Enqueue binary logging for image
+    if (data_logger_) {
+      const uint32_t idx_now = image_index_.fetch_add(1, std::memory_order_relaxed);
+      // Align image timestamp with the same policy as ROS publish path (NTP mode -> NTP time)
+      const double         ts_sec   = static_cast<double>(aligned_stamp_ns(stream->imageList[0].timestamp)) / 1e9;
+      const uint32_t       raw_size = image.length;
+      std::vector<uint8_t> blob;
+      blob.reserve(sizeof(uint32_t) + sizeof(double) + sizeof(uint32_t) + raw_size);
+      auto append_pod = [&](const auto& v) {
+        const uint8_t* p = reinterpret_cast<const uint8_t*>(&v);
+        blob.insert(blob.end(), p, p + sizeof(v));
+      };
+      append_pod(idx_now);
+      append_pod(ts_sec);
+      append_pod(raw_size);
+      blob.insert(blob.end(), raw_data, raw_data + raw_size);
+      data_logger_->enqueueImageFrame(std::move(blob));
+    }
 
-      cv_image.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp, node_);
-      cv_image.encoding     = "bgr8";
-      cv_image.image        = decoded_image;
+    // undistort image
+    cv::Mat            undistorted_image = cv::Mat::zeros(decoded_image.size(), decoded_image.type());
+    cv_bridge::CvImage cv_undistorted_image;
 
-      if (g_sendcloudrender) {
-        std::lock_guard<std::mutex> lock(rgb_queue_mutex_);
-        if (rgb_image_queue_.size() >= 10) {
-          rgb_image_queue_.pop_front();
-        }
-        rgb_image_queue_.push_back(cv_image.toImageMsg());
-      }
+    if (m_undistort_map_init_success) {
+      cv::remap(decoded_image, undistorted_image, m_undistort_map_x, m_undistort_map_y, cv::INTER_LINEAR);
+      cv_undistorted_image.header.stamp    = make_aligned_stamp(stream->imageList[0].timestamp, node_);
+      cv_undistorted_image.header.frame_id = camera_frame;
+      cv_undistorted_image.encoding        = "bgr8";
+      cv_undistorted_image.image           = undistorted_image;
+    }
 
-      // Enqueue binary logging for image
-      if (data_logger_) {
-        const uint32_t idx_now = image_index_.fetch_add(1, std::memory_order_relaxed);
-        // Align image timestamp with the same policy as ROS publish path (NTP mode -> NTP time)
-        const double         ts_sec    = static_cast<double>(aligned_stamp_ns(stream->imageList[0].timestamp)) / 1e9;
-        const uint32_t       jpeg_size = static_cast<uint32_t>(jpeg_data.size());
-        std::vector<uint8_t> blob;
-        blob.reserve(sizeof(uint32_t) + sizeof(double) + sizeof(uint32_t) + jpeg_size);
-        auto append_pod = [&](const auto& v) {
-          const uint8_t* p = reinterpret_cast<const uint8_t*>(&v);
-          blob.insert(blob.end(), p, p + sizeof(v));
-        };
-        append_pod(idx_now);
-        append_pod(ts_sec);
-        append_pod(jpeg_size);
-        blob.insert(blob.end(), jpeg_data.begin(), jpeg_data.end());
-        data_logger_->enqueueImageFrame(std::move(blob));
-      }
-
-      // undistort image
-      cv::Mat            undistorted_image = cv::Mat::zeros(decoded_image.size(), decoded_image.type());
-      cv_bridge::CvImage cv_undistorted_image;
+    {
+      rgb_pub_.publish(*cv_image.toImageMsg());
 
       if (m_undistort_map_init_success) {
-        cv::remap(decoded_image, undistorted_image, m_undistort_map_x, m_undistort_map_y, cv::INTER_LINEAR);
-        cv_undistorted_image.header.stamp    = make_aligned_stamp(stream->imageList[0].timestamp, node_);
-        cv_undistorted_image.header.frame_id = camera_frame;
-        cv_undistorted_image.encoding        = "bgr8";
-        cv_undistorted_image.image           = undistorted_image;
-      }
 
-      {
-        rgb_pub_.publish(*cv_image.toImageMsg());
+        sensor_msgs::msg::CameraInfo cam_info;
 
-        if (m_undistort_map_init_success) {
+        cam_info.k[0] = m_camera_params.fx;
+        cam_info.k[1] = 0.0;
+        cam_info.k[2] = m_camera_params.cx;
+        cam_info.k[3] = 0.0;
+        cam_info.k[4] = m_camera_params.fy;
+        cam_info.k[5] = m_camera_params.cy;
+        cam_info.k[6] = 0.0;
+        cam_info.k[7] = 0.0;
+        cam_info.k[8] = 1.0;
 
-          sensor_msgs::msg::CameraInfo cam_info;
+        cam_info.header          = cv_undistorted_image.header;
+        cam_info.header.frame_id = camera_frame;
 
-          cam_info.k[0] = m_camera_params.fx;
-          cam_info.k[1] = 0.0;
-          cam_info.k[2] = m_camera_params.cx;
-          cam_info.k[3] = 0.0;
-          cam_info.k[4] = m_camera_params.fy;
-          cam_info.k[5] = m_camera_params.cy;
-          cam_info.k[6] = 0.0;
-          cam_info.k[7] = 0.0;
-          cam_info.k[8] = 1.0;
+        cam_info.distortion_model = "plumb_bob";
 
-          cam_info.header          = cv_undistorted_image.header;
-          cam_info.header.frame_id = camera_frame;
+        cam_info.height = cv_undistorted_image.image.rows;
+        cam_info.width  = cv_undistorted_image.image.cols;
 
-          cam_info.distortion_model = "plumb_bob";
+        cam_info.d.resize(5);
+        cam_info.d[0] = 0;
+        cam_info.d[1] = 0;
+        cam_info.d[2] = 0;
+        cam_info.d[3] = 0;
+        cam_info.d[4] = 0;
 
-          cam_info.height = cv_undistorted_image.image.rows;
-          cam_info.width  = cv_undistorted_image.image.cols;
+        // rectification
+        cam_info.r[0] = 1.0;
+        cam_info.r[1] = 0.0;
+        cam_info.r[2] = 0.0;
+        cam_info.r[3] = 0.0;
+        cam_info.r[4] = 1.0;
+        cam_info.r[5] = 0.0;
+        cam_info.r[6] = 0.0;
+        cam_info.r[7] = 0.0;
+        cam_info.r[8] = 1.0;
 
-          cam_info.d.resize(5);
-          cam_info.d[0] = 0;
-          cam_info.d[1] = 0;
-          cam_info.d[2] = 0;
-          cam_info.d[3] = 0;
-          cam_info.d[4] = 0;
+        cam_info.p[0]  = m_camera_params.fx;
+        cam_info.p[1]  = 0.0;
+        cam_info.p[2]  = m_camera_params.cx;
+        cam_info.p[3]  = 0.0;
+        cam_info.p[4]  = 0.0;
+        cam_info.p[5]  = m_camera_params.fy;
+        cam_info.p[6]  = m_camera_params.cy;
+        cam_info.p[7]  = 0.0;
+        cam_info.p[8]  = 0.0;
+        cam_info.p[9]  = 0.0;
+        cam_info.p[10] = 1.0;
+        cam_info.p[11] = 0.0;
 
-          // rectification
-          cam_info.r[0] = 1.0;
-          cam_info.r[1] = 0.0;
-          cam_info.r[2] = 0.0;
-          cam_info.r[3] = 0.0;
-          cam_info.r[4] = 1.0;
-          cam_info.r[5] = 0.0;
-          cam_info.r[6] = 0.0;
-          cam_info.r[7] = 0.0;
-          cam_info.r[8] = 1.0;
-
-          cam_info.p[0]  = m_camera_params.fx;
-          cam_info.p[1]  = 0.0;
-          cam_info.p[2]  = m_camera_params.cx;
-          cam_info.p[3]  = 0.0;
-          cam_info.p[4]  = 0.0;
-          cam_info.p[5]  = m_camera_params.fy;
-          cam_info.p[6]  = m_camera_params.cy;
-          cam_info.p[7]  = 0.0;
-          cam_info.p[8]  = 0.0;
-          cam_info.p[9]  = 0.0;
-          cam_info.p[10] = 1.0;
-          cam_info.p[11] = 0.0;
-
-          undistort_rgb_pub_.publish(*cv_undistorted_image.toImageMsg(), cam_info);
-        }
+        undistort_rgb_pub_.publish(*cv_undistorted_image.toImageMsg(), cam_info);
       }
     }
   }
