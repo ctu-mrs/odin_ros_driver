@@ -18,7 +18,11 @@ windows:
       layout: tiled
       panes:
         - ros2 launch odin_ros_driver odin.launch.py
-  - rviz:
+  # - rviz:
+  #     layout: tiled
+  #     panes:
+  #       - ros2 run rviz2 rviz2 -d ./rviz.rviz
+  - foxglove_bridge:
       layout: tiled
       panes:
-        - ros2 run rviz2 rviz2 -d ./rviz.rviz
+        - ros2 launch foxglove_bridge foxglove_bridge_launch.xml

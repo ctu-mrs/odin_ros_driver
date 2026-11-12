@@ -39,7 +39,7 @@ def generate_launch_description():
         description="The uav name used for namespacing.",
     ))
 
-    # #} end of custom_config
+    # #} end of uav_name
     
     ld.add_action(Node(
         package='odin_ros_driver',

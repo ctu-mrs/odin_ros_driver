@@ -287,7 +287,7 @@ public:
     this->lidar_frame  = lidar_frame;
     this->camera_frame = camera_frame;
 
-    // publish the nominal body->lidar extrinsic right away, it gets refined once WIWC data arrive
+    // publish the nominal body->lidar extrinsic right away, it is replaced once by the first valid WIWC sample
     std::lock_guard<std::mutex> lock(extrinsics_mutex_);
     publishLidarStaticTf();
   }
@@ -1385,6 +1385,7 @@ public:
       case OdometryType::HIGHFREQ: {
 
         odom_highfreq_publisher_.publish(std::move(msg));
+
         break;
       }
 
@@ -1589,7 +1590,7 @@ private:
   Eigen::Quaterniond R_ic_{Eigen::Quaterniond::Identity()};
   Eigen::Vector3d    t_ic_{Eigen::Vector3d::Zero()};
   bool               extrinsic_ok_{false};
-  // nominal body(imu)->lidar extrinsic, used until the device sends T_IL over WIWC
+  // nominal body(imu)->lidar extrinsic, used until the first T_IL arrives over WIWC (latched once)
   Eigen::Matrix4d T_il_ = (Eigen::Matrix4d() << 1.0, 0.0, 0.0, 0.00347, 0.0, 1.0, 0.0, 0.03447, 0.0, 0.0, 1.0, 0.02174, 0.0, 0.0, 0.0, 1.0).finished();
   Eigen::Matrix4d T_cl_ = Eigen::Matrix4d::Identity();  // Camera<-Lidar from calib.yaml (optical convention)
   bool            has_T_cl_ = false;
@@ -1597,7 +1598,9 @@ private:
 
   /* updateLidarExtrinsic() //{ */
 
-  // Called with the T_IL from WIWC. Republishes the static TFs only when the extrinsic actually changes.
+  // Called with the T_IL from WIWC. The device estimates the extrinsic online and streams the
+  // current estimate continuously, so the static TF is latched from the first valid sample only;
+  // later WIWC updates are ignored (they are still available on the wiwc topic).
   void updateLidarExtrinsic(const Eigen::Matrix4d& T_il) {
 
     if (!T_il.allFinite()) {
@@ -1611,17 +1614,15 @@ private:
 
     std::lock_guard<std::mutex> lock(extrinsics_mutex_);
 
-    const double dt = (T_il.block<3, 1>(0, 3) - T_il_.block<3, 1>(0, 3)).norm();
-    const double dr = Eigen::AngleAxisd(T_il_.block<3, 3>(0, 0).transpose() * R).angle();
-
-    if (lidar_extrinsic_from_device_ && dt < 1e-4 && dr < 1e-4) {
-      return;
+    if (lidar_extrinsic_from_device_) {
+      return;  // already latched
     }
 
     T_il_                        = T_il;
     lidar_extrinsic_from_device_ = true;
 
-    RCLCPP_INFO(node_->get_logger(), "Updated body->lidar extrinsic from device: t = [%.5f, %.5f, %.5f]", T_il_(0, 3), T_il_(1, 3), T_il_(2, 3));
+    RCLCPP_INFO(node_->get_logger(), "Latched body->lidar extrinsic from device: t = [%.5f, %.5f, %.5f], further online updates are ignored", T_il_(0, 3),
+                T_il_(1, 3), T_il_(2, 3));
 
     publishLidarStaticTf();
     updateCameraExtrinsic();
@@ -1751,7 +1752,7 @@ private:
 
     opts.node          = node_;
     opts.qos           = qos_small;
-    opts.throttle_rate = 170.0;
+    opts.throttle_rate = 100.0;
 
     odom_highfreq_publisher_ = mrs_lib::PublisherHandler<nav_msgs::msg::Odometry>(opts, "~/odometry_highfreq");
   }
